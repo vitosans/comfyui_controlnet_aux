@@ -2,13 +2,12 @@ import os
 import random
 import tempfile
 import warnings
-from contextlib import suppress
 from pathlib import Path
 
 import cv2
 import numpy as np
 import torch
-from huggingface_hub import constants, hf_hub_download
+from huggingface_hub import hf_hub_download
 from torch.utils.model_zoo import load_url
 from ast import literal_eval
 
@@ -303,7 +302,13 @@ def custom_torch_download(filename, ckpts_dir=None):
     return model_path
 
 def custom_hf_download(pretrained_model_or_path, filename, cache_dir=temp_dir, ckpts_dir=None, subfolder='', use_symlinks=USE_SYMLINKS, repo_type="model"):
+    """Download a file of a Hugging Face repository into the annotator ckpts folder.
 
+    Note: `use_symlinks` is kept in the signature for backwards compatibility but it
+    has no effect anymore. huggingface_hub >= 1.0 removed the `local_dir_use_symlinks`
+    argument and downloads a real file into `local_dir`, so nothing has to be cleaned
+    up in `cache_dir` afterwards.
+    """
     model_path = _get_annotator_model_path(os.path.join(pretrained_model_or_path, *subfolder.split('/'), filename), ckpts_dir)
     if os.path.exists(model_path):
         return model_path
@@ -322,52 +327,18 @@ def custom_hf_download(pretrained_model_or_path, filename, cache_dir=temp_dir, c
         print(f"Failed to find {model_path}.\n Downloading from huggingface.co")
         print(f"cacher folder is {cache_dir}, you can change it by custom_tmp_path in config.yaml")
         if use_symlinks:
-            cache_dir_d = constants.HF_HUB_CACHE    # use huggingface newer env variables `HF_HUB_CACHE`
-            if cache_dir_d is None:
-                import platform
-                if platform.system() == "Windows":
-                    cache_dir_d = Path(os.getenv("USERPROFILE")).joinpath(".cache", "huggingface", "hub").__str__()
-                else:
-                    cache_dir_d = os.path.join(os.getenv("HOME"), ".cache", "huggingface", "hub")
-            try:
-                # test_link
-                Path(cache_dir_d).mkdir(parents=True, exist_ok=True)
-                Path(ckpts_dir).mkdir(parents=True, exist_ok=True)
-                (Path(cache_dir_d) / f"linktest_{filename}.txt").touch()
-                # symlink instead of link avoid `invalid cross-device link` error.
-                os.symlink(os.path.join(cache_dir_d, f"linktest_{filename}.txt"), os.path.join(ckpts_dir, f"linktest_{filename}.txt"))
-                print("Using symlinks to download models. \n",\
-                      "Make sure you have enough space on your cache folder. \n",\
-                      "And do not purge the cache folder after downloading.\n",\
-                      "Otherwise, you will have to re-download the models every time you run the script.\n",\
-                      "You can use USE_SYMLINKS: False in config.yaml to avoid this behavior.")
-            except:
-                print("Maybe not able to create symlink. Disable using symlinks.")
-                use_symlinks = False
-                cache_dir_d = Path(cache_dir).joinpath("ckpts", pretrained_model_or_path).__str__()
-            finally:    # always remove test link files
-                with suppress(FileNotFoundError):
-                    os.remove(os.path.join(ckpts_dir, f"linktest_{filename}.txt"))
-                    os.remove(os.path.join(cache_dir_d, f"linktest_{filename}.txt"))
-        else:
-            cache_dir_d = os.path.join(cache_dir, "ckpts", pretrained_model_or_path)
-
+            warnings.warn(
+                "USE_SYMLINKS is ignored: huggingface_hub >= 1.0 always downloads a real "
+                "file into the ckpts folder and does not support symlinks anymore."
+            )
         model_path = hf_hub_download(repo_id=pretrained_model_or_path,
-            cache_dir=cache_dir_d,
+            cache_dir=os.path.join(cache_dir, "ckpts", pretrained_model_or_path),
             local_dir=local_dir,
             subfolder=subfolder,
             filename=filename,
-            local_dir_use_symlinks=use_symlinks,
-            resume_download=True,
             etag_timeout=100,
             repo_type=repo_type
         )
-        if not use_symlinks:
-            try:
-                import shutil
-                shutil.rmtree(os.path.join(cache_dir, "ckpts"))
-            except Exception as e :
-                print(e)
 
     print(f"model_path is {model_path}")
 
